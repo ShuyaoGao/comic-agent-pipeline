@@ -1,0 +1,26 @@
+# ---- 密钥 / 本地配置（绝不提交）----
+.env
+.env.*
+!.env.example
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# ---- Node ----
+node_modules/
+
+# ---- 系统 / 编辑器 ----
+.DS_Store
+Thumbs.db
+*.log
+
+# ---- 运行产物（python main.py 写到 output/）----
+output/
+
+# ---- Release zip 上传到 GitHub Releases，不进仓库 ----
+release/

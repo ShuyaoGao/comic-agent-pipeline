@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>漫剧多 Agent 流水线</title>
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/mobile.css">
+</head>
+<body>
+
+<header id="topbar">
+  <div class="brand"><span id="app-name">漫剧多 Agent 流水线</span><small id="app-tagline"></small></div>
+  <nav id="modes" role="tablist">
+    <button data-mode="watch" title="自动用一个示例创意把 9 个 Agent 跑一遍">观看</button>
+    <button data-mode="edit" title="输入自己的创意、换 seed、换成本档、单步或从某阶段重跑">我来编</button>
+    <button data-mode="practice" title="带任务清单的练习，完成一项自动打勾">练习</button>
+  </nav>
+  <span class="spacer"></span>
+  <a class="link" id="director-link" href="director.html" title="打开 3D 导演台（新页面）：拖拽摆角色 / 机位 / 灯光，导出镜头 JSON">3D 导演台 ↗</a>
+  <label class="switch" id="big-wrap" title="左右比例从约 45:55 调到约 35:65，方便投影"><input type="checkbox" id="bigscreen"> 大屏模式</label>
+  <button id="help-btn" class="icon" title="操作说明（H）">?</button>
+  <button id="exit-btn" class="exit" title="停止全部计算并关闭页面">退出</button>
+  <button id="menu-btn" class="icon" aria-label="菜单" aria-expanded="false" title="菜单">☰</button>
+</header>
+<!-- 手机：头部压成一行后，其余入口收进这个菜单 -->
+<div id="menu" hidden>
+  <a id="menu-director" href="director.html">3D 导演台 ↗</a>
+  <button id="menu-help">操作说明</button>
+  <div class="sep"></div>
+  <button id="menu-exit">退出</button>
+</div>
+
+<main id="layout">
+  <!-- ============ 左栏：作品画面 + 选项 / 控制 / 说明 ============ -->
+  <section id="leftcol">
+    <div class="card" id="viewcard">
+      <div class="viewhead">
+        <b id="view-title">作品画面</b>
+        <span class="spacer"></span>
+        <span class="seg" id="view-tabs" title="查看任一已完成阶段的产物"></span>
+      </div>
+      <div id="view"></div>
+    </div>
+
+    <!-- 手机（我来编 / 练习）：过程面板默认收起，这一行的按钮把它全屏展开 -->
+    <div id="mob-bar">
+      <button class="mbtn primary" id="panel-btn">看过程面板</button>
+      <span id="mob-explain">流程图 · 共享状态 JSON · 一致性矩阵 · 成本与调度 · 生成日志</span>
+    </div>
+
+    <div class="card" id="dock">
+      <div class="row">
+        <label class="grow">一句创意 <input id="idea" type="text" maxlength="200"></label>
+        <select id="idea-samples" title="示例创意"></select>
+        <label>seed <input id="seed" type="number" min="0" max="2147483647" step="1" style="width:110px"></label>
+      </div>
+      <div class="row">
+        <span class="lbl">成本档</span><span class="seg" id="cost-presets"></span>
+        <span class="lbl">速度</span><span class="seg" id="speed-presets"></span>
+      </div>
+      <div class="row ctl">
+        <button class="btn primary" id="btn-run">▶ 一键跑完</button>
+        <button class="btn" id="btn-step">⏭ 单步</button>
+        <button class="btn" id="btn-pause" disabled>⏸ 暂停</button>
+        <span class="lbl">从</span>
+        <select id="from-stage" title="清空该阶段及之后，用当前创意 / seed 重跑"></select>
+        <button class="btn" id="btn-rerun">↻ 重跑</button>
+        <button class="btn" id="btn-reset">⟲ 清空</button>
+        <span class="spacer"></span>
+        <button class="btn" id="btn-import" title="导入 3D 导演台导出的镜头 JSON，替换分镜并重跑 美术 → 合成 → 质检">⬆ 导入导演台 JSON</button>
+        <button class="btn" id="btn-export" title="下载 state.json + generation_log.jsonl + cost/dispatch">⬇ 导出 JSON</button>
+      </div>
+      <div id="caption"><b id="cap-title">准备开始</b><span id="cap-text"></span></div>
+      <ol id="tasks" hidden></ol>
+    </div>
+  </section>
+
+  <!-- ============ 右栏：流水线面板 ============ -->
+  <section id="rightcol">
+    <div class="card" id="flowcard">
+      <h3>流水线 <span class="sub">9 个 Agent 依次读写同一份共享状态；点节点可查看它的产物</span></h3>
+      <div id="flow"></div>
+    </div>
+    <div class="card" id="tabcard">
+      <div class="tabs">
+        <button data-rtab="state" class="on">共享状态 JSON</button>
+        <button data-rtab="matrix">一致性矩阵</button>
+        <button data-rtab="cost">成本与调度</button>
+        <button data-rtab="log">生成日志</button>
+        <span class="spacer"></span><span class="hint" id="rtab-hint"></span>
+      </div>
+      <div class="rpane on" id="rpane-state"><div id="state-tree"></div></div>
+      <div class="rpane" id="rpane-matrix"><div id="matrix"></div></div>
+      <div class="rpane" id="rpane-cost"><div id="costbox"></div></div>
+      <div class="rpane" id="rpane-log"><div id="logbox"></div></div>
+    </div>
+  </section>
+</main>
+
+<footer id="footer"></footer>
+
+<!-- 手机：全屏面板共用的「返回」按钮；横屏提示 -->
+<button class="mbtn primary" id="panel-close" hidden>返回</button>
+<div id="rotate-hint"><div><b>竖屏体验更佳</b>把手机转成竖屏，流水线的产物、过程面板和按钮会按宽度排成一列。<br>
+  <button id="rotate-ok">仍然横屏继续</button></div></div>
+
+<div class="dlg-mask" id="dlg-help">
+  <div class="dlg help">
+    <h3>操作说明 <span class="sub kbd-only">（随时按 H 或右上角 “?” 再打开）</span><span class="sub touch-only">（随时从 ☰ 菜单再打开）</span></h3>
+    <div class="dlg-body">
+    <div class="touch-only">
+      <h4>手机上怎么操作</h4>
+      <svg viewBox="0 0 360 150" role="img" aria-label="触屏操作图解：点顶部模式标签，点一键跑完或单步，点看过程面板">
+        <rect x="4" y="4" width="352" height="142" rx="12" fill="#0b0e12" stroke="#39434e"/>
+        <rect x="14" y="14" width="332" height="26" rx="6" fill="#171c22"/>
+        <text x="22" y="32" fill="#e7edf3" font-size="12">漫剧流水线</text>
+        <rect x="118" y="17" width="46" height="20" rx="5" fill="#4f8cff"/><text x="128" y="31" fill="#fff" font-size="11">观看</text>
+        <rect x="166" y="17" width="52" height="20" rx="5" fill="#243140"/><text x="172" y="31" fill="#9bb0c3" font-size="11">我来编</text>
+        <rect x="220" y="17" width="46" height="20" rx="5" fill="#243140"/><text x="230" y="31" fill="#9bb0c3" font-size="11">练习</text>
+        <rect x="312" y="16" width="28" height="22" rx="5" fill="#1e252d"/><text x="320" y="32" fill="#e7edf3" font-size="13">☰</text>
+        <circle cx="192" cy="27" r="9" fill="none" stroke="#ffd95c" stroke-width="2"/>
+        <text x="206" y="56" fill="#ffd95c" font-size="11">① 点模式标签</text>
+        <rect x="14" y="48" width="200" height="60" rx="6" fill="#171c22"/>
+        <text x="22" y="66" fill="#ffd95c" font-size="11">作品画面</text>
+        <text x="22" y="84" fill="#9bb0c3" font-size="10">1 选题 › 2 编剧 › 3 审稿 › …（左右滑）</text>
+        <text x="22" y="100" fill="#c5d1dc" font-size="10">剧本 / 角色 / 分镜 / 俯视图 / 草样片</text>
+        <rect x="14" y="114" width="92" height="24" rx="6" fill="#4f8cff"/><text x="22" y="130" fill="#fff" font-size="11">▶ 一键跑完</text>
+        <rect x="112" y="114" width="60" height="24" rx="6" fill="#243140"/><text x="120" y="130" fill="#e7edf3" font-size="11">⏭ 单步</text>
+        <circle cx="60" cy="126" r="9" fill="none" stroke="#ffd95c" stroke-width="2"/>
+        <text x="180" y="130" fill="#ffd95c" font-size="11">② 点一下跑流水线</text>
+        <rect x="222" y="62" width="124" height="40" rx="8" fill="#4f8cff"/>
+        <text x="234" y="86" fill="#fff" font-size="12">看过程面板</text>
+        <circle cx="284" cy="82" r="9" fill="none" stroke="#ffd95c" stroke-width="2"/>
+        <text x="232" y="112" fill="#ffd95c" font-size="11">③ 全屏看面板，「返回」关</text>
+      </svg>
+      <p>竖屏打开。顶部一行：标题、模式标签、☰ 菜单（3D 导演台、说明、退出）。上方是这一阶段的产物，阶段步骤条可以左右滑；
+        往下是输入创意、seed、成本档和按钮。「观看」模式下过程面板紧跟在产物下方；「我来编 / 练习」里点「看过程面板」全屏展开，点「返回」关闭。</p>
+    </div>
+    <div class="helpgrid">
+      <div>
+        <h4>这是什么</h4>
+        <p>一个漫剧（短视频漫画剧）生产流水线的离线演示：<b>一句创意 → 9 个 Agent</b>（选题、编剧、审稿合规、角色设定、分镜、导演台、美术、合成、质检）
+          → 剧本、角色、分镜表、导演台俯视图、分镜卡、草样片、质检报告、成本估算。每个 Agent 读写同一份<b>结构化 JSON</b>（右栏“共享状态”）。</p>
+        <p class="warn">全部离线：文字由<b>离线编造器</b>按规则确定性生成（不是真实大模型）；图片是占位卡片，配音是提示音，草样片是轮播。
+          它们演示的是<b>工程闭环、角色一致性机制、成本权衡</b>，不是画质。</p>
+        <h4>三个模式</h4>
+        <ul>
+          <li><b>观看</b>：自动用示例创意逐个阶段跑一遍，左边看产物、右边看流程和共享状态怎么“长出来”。</li>
+          <li><b>我来编</b>：输入自己的创意、改 seed、换成本档；一键跑完或单步；从任一阶段重跑；导入 3D 导演台的镜头。</li>
+          <li><b>练习</b>：按任务清单做，完成一项自动打勾。</li>
+        </ul>
+      </div>
+      <div>
+        <h4>右栏四个标签</h4>
+        <ul>
+          <li><b>共享状态 JSON</b>：刚写入的阶段会高亮。点阶段名展开 / 收起。</li>
+          <li><b>一致性矩阵</b>：每个镜头 × 4 项检查（seed 复用、参考图复用、固定外貌写进提示词、负面词抑制漂移）。</li>
+          <li><b>成本与调度</b>：若改用真实云端模型生产本片约花多少钱，以及“只给关键镜出真实视频”能省多少。单价全是示意值。</li>
+          <li><b>生成日志</b>：每次生成记一条：模型、提示词、seed、token（估算）、成本。</li>
+        </ul>
+        <h4>两组预设档位</h4>
+        <ul>
+          <li><b>成本档</b>：省钱 / 标准 / 高质量 / 全量真实视频（只影响估算，不影响离线结果）。</li>
+          <li><b>速度</b>：逐段讲解 / 正常 / 快速 / 瞬间。</li>
+        </ul>
+        <h4>3D 导演台</h4>
+        <p><span class="kbd-only">右上角“3D 导演台 ↗”</span><span class="touch-only inl">☰ 菜单里的“3D 导演台 ↗”</span>打开新页面，拖拽摆角色、机位、灯光，导出镜头 JSON，再回到这里“导入导演台 JSON”。</p>
+        <h4>关于离线</h4>
+        <p>纯静态网页：不联网、不调用任何 API，关掉标签页就全部结束。</p>
+      </div>
+    </div>
+    </div>
+    <div class="dlg-btns"><button class="btn primary" id="help-close">开始</button></div>
+  </div>
+</div>
+
+<div id="ended"><div><h2>已停止运行</h2><p>所有计算都已结束，可以直接关闭这个标签页。</p></div></div>
+<input type="file" id="file-import" accept=".json" hidden>
+<div id="toast"></div>
+<pre id="selftest" hidden></pre>
+
+<script src="names.js"></script>
+<script src="js/credits.js"></script>
+<script src="js/pyrt.js"></script>
+<script src="js/mock_llm.js"></script>
+<script src="js/pipeline.js"></script>
+<script src="js/presets.js"></script>
+<script src="js/sample_export.js"></script>
+<script src="js/render.js"></script>
+<script src="js/mobile.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

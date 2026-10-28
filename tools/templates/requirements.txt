@@ -1,0 +1,11 @@
+# 漫剧多 Agent 流水线（Python 版）依赖清单
+# 离线 mock 模式只需要前三个；真实 API 模式才需要后两个。浏览器版（play/）不需要任何 Python 依赖。
+
+# ---- 离线 mock 模式必需 ----
+pydantic>=2.6,<3        # 结构化数据校验：角色 / 镜头等数据结构
+Pillow>=10.2            # 离线占位分镜图、导演台俯视图、草样片 GIF
+PyYAML>=6.0             # 读取 config.yaml（模型名 / 价格都是可配置项）
+
+# ---- 真实 API 模式才需要（离线 mock 模式可不装）----
+requests>=2.31          # 调用云端文本 / 图像 API 的 HTTP 客户端
+python-dotenv>=1.0      # 从 .env 读取 API key（避免把密钥写进代码）

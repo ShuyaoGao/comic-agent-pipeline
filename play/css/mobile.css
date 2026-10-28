@@ -1,0 +1,138 @@
+/* ============================================================================
+   手机 / 触屏布局（触屏 + 宽度 ≤ 980px → body.touchp，由 js/mobile.js 加；触屏横屏 → 再加 body.touchl）
+   流程 / 参数类页面：整页可以上下滚动，但任何尺寸都不能横向溢出。
+     body.touch / .touchp / .touchl        设备分类（mobile.js detect）
+     body.m-watch / .m-edit / .m-practice  当前模式（app.js 在切换模式时加）
+     body.sheet-panel                      右栏「智能体过程面板」全屏打开（mobile.js sheets）；#panel-close 是「返回」
+     body.rot-ok                           横屏下选择了「仍然横屏继续」
+     #menu-btn #menu                       ☰ 菜单（头部压成一行后其余入口都收在这里：3D 导演台、说明、退出）
+     #mob-bar #panel-btn                   主画面下方的一行：「看过程面板」按钮 + 进度说明
+     .tw                                   表格的横向滚动容器（容器内滚动，整页不横向溢出）
+     .touch-only / .kbd-only               说明浮层里只给触屏 / 只给键盘看的内容
+   观看：主画面 → 过程面板（紧凑画法，各标签页限高、内部滚动）→ 控制区。
+   我来编 / 练习：主画面 → 「看过程面板」按钮 → 控制区（按钮、输入框触控区 ≥ 44px）；面板默认收起，按钮全屏展开。
+   ============================================================================ */
+#menu-btn, #menu, #mob-bar, #panel-close, #rotate-hint, .touch-only { display: none; }
+.pressed { filter: brightness(1.25); transform: scale(.97); }
+.tw { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+
+body.touch .touch-only { display: block; }
+body.touch .touch-only.inl { display: inline; }
+body.touch .kbd-only { display: none; }
+
+/* ---- 整体：单列、整页上下滚动、不横向溢出、适配刘海 ---- */
+body.touchp { height: auto; min-height: 100dvh; overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column;
+  font-size: 14px; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: manipulation;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+body.touchp input, body.touchp textarea, body.touchp pre, body.touchp .prompt { -webkit-user-select: text; user-select: text; }
+
+/* ---- 头部压成一行：标题、模式标签、☰ ---- */
+body.touchp #topbar { flex: none; gap: 6px; padding: 4px 8px; min-height: 50px; position: sticky; top: 0; z-index: 50; }
+body.touchp .brand { flex: 1 1 auto; min-width: 48px; }
+body.touchp #app-name { display: block; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+body.touchp #app-tagline, body.touchp #director-link, body.touchp #big-wrap, body.touchp #help-btn, body.touchp #exit-btn,
+body.touchp #topbar .spacer { display: none; }
+body.touchp #modes { padding: 2px; gap: 2px; }
+body.touchp #modes button { padding: 0 9px; min-height: 40px; font-size: 14px; }
+body.touchp #menu-btn { display: block; width: 44px; height: 44px; border-radius: 8px; font-size: 20px; }
+body.touchp #menu:not([hidden]) { display: grid; position: fixed; z-index: 90; right: 8px; top: calc(env(safe-area-inset-top) + 54px);
+  min-width: 200px; background: var(--panel); border: 1px solid var(--accent); border-radius: 12px; padding: 6px; gap: 2px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.55); }
+#menu button, #menu a { display: flex; align-items: center; font-size: 15px; text-align: left; padding: 10px 14px; min-height: 44px;
+  border-radius: 8px; color: var(--ink); background: transparent; border: none; text-decoration: none; font-family: inherit; cursor: pointer; }
+#menu button:active, #menu a:active { background: #243140; }
+#menu .sep { height: 1px; background: var(--line); margin: 4px 0; }
+
+/* ---- 布局：主画面 → 过程面板 / 按钮 → 控制区 ---- */
+body.touchp #layout { display: flex; flex-direction: column; gap: 8px; padding: 6px 8px calc(env(safe-area-inset-bottom) + 6px);
+  min-height: 0; overflow: visible; flex: none; }
+body.touchp #leftcol { display: contents; }
+body.touchp #viewcard { order: 0; flex: none; }
+body.touchp #mob-bar { order: 1; }
+body.touchp #rightcol { order: 2; flex: none; gap: 8px; }
+body.touchp #dock { order: 3; }
+body.touchp.m-watch #mob-bar { display: none; }
+body.touchp:not(.m-watch) #dock { order: 2; }
+body.touchp:not(.m-watch):not(.sheet-panel) #rightcol { display: none; }
+
+/* ---- 主画面：阶段步骤条可横滚，内容按宽度单列 ---- */
+body.touchp #view { flex: none; overflow: visible; }
+body.touchp .viewhead { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 4px; }
+body.touchp .viewhead .spacer { display: none; }
+body.touchp #view-tabs { display: flex; flex-wrap: nowrap; overflow-x: auto; max-width: 100%; touch-action: pan-x; scrollbar-width: thin; }
+body.touchp .seg button { min-height: 44px; font-size: 14px; padding: 0 10px; flex: none; }
+body.touchp .grid.g3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+body.touchp .grid.g6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+body.touchp .reelwrap { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }   /* wrap 会让行宽随最宽子项（表格）撑开 */
+body.touchp .reelwrap > * { min-width: 0; max-width: 100%; }
+body.touchp .timeline { min-width: 0; }
+body.touchp .score-row { grid-template-columns: 78px 1fr 60px; }
+body.touchp .tw table.t { width: max-content; min-width: 100%; }
+body.touchp .tw td, body.touchp .tw th { max-width: 60vw; }
+body.touchp .prompt { word-break: break-word; }
+
+/* ---- 控制区：触控区 ≥ 44px，标签 ≥ 14px ---- */
+body.touchp #dock { max-height: none; overflow: visible; flex: none; gap: 8px; }
+body.touchp .row { gap: 6px 8px; }
+body.touchp .row label { font-size: 14px; min-height: 44px; }
+body.touchp .row label.grow { flex: 1 1 100%; min-width: 0; }
+body.touchp input[type=text], body.touchp input[type=number], body.touchp select { min-height: 44px; font-size: 16px; padding: 6px 10px; }
+body.touchp #seed { width: 140px !important; }
+body.touchp #idea-samples { flex: 1 1 140px; min-width: 0; }
+body.touchp .lbl { font-size: 14px; }
+body.touchp .btn { min-height: 44px; font-size: 14px; padding: 0 12px; flex: 1 1 auto; }
+body.touchp .row.ctl .spacer { display: none; }
+body.touchp #from-stage { flex: 1 1 130px; }
+body.touchp #caption { font-size: 14px; }
+body.touchp #cap-title { display: block; margin-bottom: 2px; }
+body.touchp #tasks { grid-template-columns: 1fr; font-size: 14px; gap: 6px; }
+
+/* ---- 主画面下方的一行：「看过程面板」 ---- */
+body.touchp #mob-bar { display: flex; align-items: center; gap: 8px; min-height: 48px; }
+.mbtn { min-height: 44px; min-width: 64px; padding: 0 14px; border-radius: 10px; background: #243140; color: var(--ink); border: 1px solid #39434e;
+  font-size: 14px; cursor: pointer; white-space: nowrap; font-family: inherit; }
+.mbtn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+#mob-explain { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); line-height: 1.4; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* ---- 过程面板的紧凑画法（观看模式放主画面下方） ---- */
+body.touchp #flowcard, body.touchp #tabcard { flex: none; }
+body.touchp #flowcard h3 .sub { display: none; }
+body.touchp #flow { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+body.touchp .node { min-height: 44px; padding: 4px 6px; font-size: 13px; }
+body.touchp .node:not(:last-child)::after { display: none; }
+body.touchp .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+body.touchp .tabs button { min-height: 44px; font-size: 14px; padding: 0 10px; flex: none; }
+body.touchp .tabs .hint, body.touchp .tabs .spacer { display: none; }
+body.touchp .rpane.on { max-height: 60vh; overflow: auto; }
+body.touchp .sk pre { max-height: 240px; }
+
+/* ---- 全屏面板：「看过程面板」展开，「返回」关闭 ---- */
+body.touchp.sheet-panel { overflow: hidden; height: 100dvh; }
+body.touchp.sheet-panel #rightcol { display: flex; flex-direction: column; position: fixed; z-index: 85; inset: 0; overflow-y: auto; overflow-x: hidden;
+  background: var(--bg); padding: calc(env(safe-area-inset-top) + 8px) 10px calc(env(safe-area-inset-bottom) + 76px); gap: 8px; }
+body.touchp.sheet-panel #rightcol .rpane.on { max-height: none; overflow: visible; }
+body.touchp.sheet-panel #panel-close { display: block; position: fixed; z-index: 86; left: 50%; transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom) + 12px); min-width: 150px; min-height: 48px; padding: 0 26px; border-radius: 24px;
+  font-size: 16px; box-shadow: 0 6px 18px rgba(0,0,0,.55); }
+
+/* ---- 横屏手机：提示竖屏体验更佳 ---- */
+body.touchl:not(.rot-ok) #rotate-hint { display: grid; position: fixed; inset: 0; z-index: 95; place-items: center; text-align: center;
+  background: rgba(15,18,22,.96); padding: 16px; line-height: 1.8; }
+#rotate-hint b { font-size: 20px; display: block; margin-bottom: 6px; color: var(--accent2); }
+#rotate-hint button { margin-top: 12px; padding: 10px 20px; min-height: 44px; border: 1px solid var(--line); border-radius: 10px; font-size: 15px;
+  background: var(--panel2); color: var(--ink); font-family: inherit; }
+
+/* ---- 说明浮层：触屏下显示触屏图解，可上下滚动，「开始」固定在底部 ---- */
+:is(body.touchp, body.touchl) .dlg-mask { padding: 8px; align-items: stretch; }
+:is(body.touchp, body.touchl) .dlg { display: flex; flex-direction: column; max-width: none; width: 100%; max-height: none; height: 100%;
+  padding: 14px 12px calc(env(safe-area-inset-bottom) + 10px); overflow: hidden; }
+:is(body.touchp, body.touchl) .dlg-body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+:is(body.touchp, body.touchl) .dlg-btns { flex: none; margin-top: 10px; justify-content: center; }
+:is(body.touchp, body.touchl) .dlg-btns .btn { min-height: 48px; min-width: 160px; font-size: 16px; }
+body.touchp .helpgrid { grid-template-columns: 1fr; gap: 8px; }
+body.touchp .dlg p, body.touchp .dlg li { font-size: 14px; }
+.touch-only svg { width: 100%; max-width: 360px; height: auto; display: block; margin: 4px auto 6px; }
+
+/* ---- 页脚 ---- */
+body.touchp #footer { white-space: normal; font-size: 11px; padding-bottom: max(6px, env(safe-area-inset-bottom)); flex: none; }

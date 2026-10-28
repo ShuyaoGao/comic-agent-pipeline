@@ -1,0 +1,321 @@
+# -*- coding: utf-8 -*-
+"""Open play/index.html (and play/director.html) in the locally installed Edge / Chrome (headless),
+run the pages' built-in self-tests at 1920x1080 and 1366x768, write results/result.json, optionally take screenshots.
+
+    python -m tools.browser_check                     # self-tests -> results/result.json
+    python -m tools.browser_check --shots docs/img    # also write README screenshots
+
+Only an already installed Edge / Chrome is used (no browser downloads). Two drivers:
+
+  1. Playwright (preferred, `pip install playwright`; it uses the installed Edge through channel="msedge",
+     nothing is downloaded). The machine-wide Edge lock and free-memory guard from tools/mobile_check.py are
+     used, so that only one Edge runs on the machine at a time.
+  2. Fallback: launch the browser executable directly with --headless --dump-dom / --screenshot in a temporary
+     --user-data-dir; only the processes started here are terminated.
+
+index.html?selftest=1 runs the whole 9-agent pipeline for the demo idea, a red-flag idea and an imported
+3D-stage export, renders every stage view, switches all modes and right-panel tabs, checks layout
+(no horizontal overflow, both columns inside the window) and that no JS error occurred.
+director.html?selftest=1 checks that the bundled three.js r128 loads, the stage has actors and the
+exported shot JSON has every Shot field (WebGL runs on the software renderer in headless mode).
+Phone sizes are checked separately by tools/mobile_check_cap.py.
+"""
+
+import argparse
+import contextlib
+import ctypes
+import html
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+INDEX = ROOT / "play" / "index.html"
+DIRECTOR = ROOT / "play" / "director.html"
+RESULT = ROOT / "results" / "result.json"
+SIZES = [(1920, 1080), (1366, 768)]
+CANDIDATES = [
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+]
+SWIFTSHADER = ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"]
+SHOTS = [
+    ("01-director-1920x1080.png", (1920, 1080), "shot=director"),
+    ("02-compose-1920x1080.png", (1920, 1080), "shot=compose"),
+    ("03-mid-1366x768.png", (1366, 768), "shot=mid"),
+]
+
+
+# ----------------------------------------------------------------------------- shared helpers
+def find_browser():
+    env = os.environ.get("BROWSER_EXE")
+    if env and Path(env).exists():
+        return env
+    for c in CANDIDATES:
+        if Path(c).exists():
+            return c
+    for name in ("msedge", "microsoft-edge", "google-chrome", "chromium", "chrome"):
+        p = shutil.which(name)
+        if p:
+            return p
+    return None
+
+
+def free_mb():
+    if sys.platform != "win32":
+        return None
+
+    class MS(ctypes.Structure):
+        _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+    m = MS()
+    m.dwLength = ctypes.sizeof(MS)
+    ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
+    return m.ullAvailPhys // (1024 * 1024)
+
+
+def wait_for_memory(min_mb, max_wait_s):
+    t0 = time.time()
+    while True:
+        f = free_mb()
+        if f is None or f >= min_mb:
+            return f
+        if time.time() - t0 > max_wait_s:
+            raise SystemExit(f"free memory {f} MB < {min_mb} MB after waiting {max_wait_s}s: browser check NOT run")
+        print(f"  free memory {f} MB < {min_mb} MB, waiting...", flush=True)
+        time.sleep(20)
+
+
+def shared_lock():
+    """The machine-wide Edge lock from tools/mobile_check.py (one Edge at a time on this machine)."""
+    try:
+        sys.path.insert(0, str(ROOT))
+        from tools.mobile_check import EdgeLock
+    except ImportError:
+        return None
+    return EdgeLock()
+
+
+def browser_version(exe):
+    if sys.platform == "win32":
+        try:
+            r = subprocess.run(["powershell", "-NoProfile", "-Command", f"(Get-Item '{exe}').VersionInfo.ProductVersion"],
+                               capture_output=True, text=True, timeout=20)
+            return r.stdout.strip() or None
+        except Exception:
+            return None
+    return None
+
+
+def write_result(results, director, browser):
+    r = results.get("1920x1080") or next(iter(results.values()))
+    st = r.get("steps", {})
+    out = {
+        "_note": "Generated by tools/browser_check.py from the page's built-in self-test (index.html?selftest=1). "
+                 "All numbers come from the offline mock pipeline (rule-based, not a real model); token counts are "
+                 "length-based estimates; prices are illustrative.",
+        "browser": browser,
+        "demo": st.get("demo"),
+        "warn_case": st.get("warn_case"),
+        "import": st.get("import"),
+        "reel": st.get("reel"),
+        "director_page": director,
+        "runs": {k: {"ok": v.get("ok"), "errors": v.get("errors"), "ms": v.get("ms"), "layout": v.get("layout")}
+                 for k, v in results.items()},
+    }
+    RESULT.parent.mkdir(parents=True, exist_ok=True)
+    RESULT.write_text(json.dumps(out, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    return RESULT
+
+
+def good(r):
+    return bool(r.get("ok")) and not r.get("errors")
+
+
+# ----------------------------------------------------------------------------- driver 1: Playwright
+def playwright_available():
+    try:
+        import playwright.sync_api  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def run_playwright(do_shots, shots_dir, results):
+    """Returns (ok, director_result, browser_info) or None when no Edge / Chrome channel is available."""
+    from playwright.sync_api import sync_playwright
+
+    ok = True
+    with sync_playwright() as p:
+        browser, channel = None, None
+        for channel in ("msedge", "chrome"):
+            try:
+                browser = p.chromium.launch(channel=channel, headless=True, args=SWIFTSHADER)
+                print("browser: playwright channel", channel, browser.version)
+                break
+            except Exception as e:  # channel not installed
+                print(f"  playwright channel {channel} unavailable: {str(e).splitlines()[0][:120]}")
+        if browser is None:
+            return None
+        info = {"name": channel, "version": browser.version, "driver": "playwright"}
+
+        def selftest(url, size, timeout=180000):
+            ctx = browser.new_context(viewport={"width": size[0], "height": size[1]}, locale="zh-CN")
+            page = ctx.new_page()
+            errs = []
+            page.on("pageerror", lambda e: errs.append(f"pageerror: {e}"))
+            page.goto(url + "?selftest=1")
+            try:
+                page.wait_for_function("(() => { const e = document.getElementById('selftest'); return e && e.textContent.length > 0; })()",
+                                       timeout=timeout)
+                r = json.loads(page.evaluate("document.getElementById('selftest').textContent"))
+            except Exception as e:
+                r = {"ok": False, "errors": [f"self-test did not finish: {e!r}"[:300]]}
+            if errs:
+                r.setdefault("errors", []).extend(errs)
+            ctx.close()
+            return r
+
+        try:
+            for size in SIZES:
+                r = selftest(INDEX.as_uri(), size)
+                results[f"{size[0]}x{size[1]}"] = r
+                ok = ok and good(r)
+                print(f"[{size[0]}x{size[1]}] {'PASS' if good(r) else 'FAIL'}: {json.dumps(r, ensure_ascii=False)[:1500]}", flush=True)
+            director = selftest(DIRECTOR.as_uri(), (1920, 1080), 60000)
+            ok = ok and good(director)
+            print(f"[director 1920x1080] {'PASS' if good(director) else 'FAIL'}: {json.dumps(director, ensure_ascii=False)}", flush=True)
+            if do_shots:
+                for name, size, q in SHOTS:
+                    ctx = browser.new_context(viewport={"width": size[0], "height": size[1]}, locale="zh-CN")
+                    page = ctx.new_page()
+                    page.goto(INDEX.as_uri() + "?" + q + "&nohelp=1")
+                    page.wait_for_function("window.__cap && window.__cap.ready", timeout=180000)
+                    page.wait_for_timeout(700)
+                    out = shots_dir / name
+                    page.screenshot(path=str(out), full_page=False)
+                    ctx.close()
+                    done = out.exists() and out.stat().st_size > 0
+                    print(f"  screenshot {name}: {'ok' if done else 'FAILED'}", flush=True)
+                    ok = ok and done
+        finally:
+            browser.close()
+    return ok, director, info
+
+
+# ----------------------------------------------------------------------------- driver 2: raw executable
+def run_browser(exe, url, size, extra, timeout=180):
+    prof = tempfile.mkdtemp(prefix="cap_edge_")
+    args = [exe, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+            "--disable-extensions", "--disable-sync", "--mute-audio", "--hide-scrollbars",
+            "--allow-file-access-from-files",
+            f"--user-data-dir={prof}", f"--window-size={size[0]},{size[1]}"] + extra + [url]
+    p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        out, _ = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
+        else:
+            p.kill()
+        out, _ = p.communicate()
+        raise RuntimeError(f"browser timed out after {timeout}s")
+    finally:
+        time.sleep(0.5)
+        shutil.rmtree(prof, ignore_errors=True)
+    return out.decode("utf-8", "replace")
+
+
+def selftest_raw(exe, size, page=None, extra=()):
+    url = (page or INDEX).as_uri() + "?selftest=1"
+    dom = run_browser(exe, url, size, ["--virtual-time-budget=60000", "--dump-dom", *extra])
+    m = re.search(r'<pre id="selftest"[^>]*>(.*?)</pre>', dom, re.S)
+    if not m or not m.group(1).strip():
+        return {"ok": False, "errors": ["self-test result not found in DOM"],
+                "title": re.findall(r"<title>(.*?)</title>", dom)}
+    return json.loads(html.unescape(m.group(1)))
+
+
+def screenshot_raw(exe, size, query, path):
+    url = INDEX.as_uri() + "?" + query
+    path = Path(path).resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+    run_browser(exe, url, size, ["--virtual-time-budget=8000", f"--screenshot={path}"])
+    return path.exists() and path.stat().st_size > 0
+
+
+def run_raw(exe, do_shots, shots_dir, results, min_free_mb, max_wait):
+    print("browser:", exe)
+    ok = True
+    for size in SIZES:
+        f = wait_for_memory(min_free_mb, max_wait)
+        print(f"[{size[0]}x{size[1]}] free memory: {f} MB", flush=True)
+        r = selftest_raw(exe, size)
+        results[f"{size[0]}x{size[1]}"] = r
+        ok = ok and good(r)
+        print(f"  {'PASS' if good(r) else 'FAIL'}: {json.dumps(r, ensure_ascii=False)[:1500]}", flush=True)
+    f = wait_for_memory(min_free_mb, max_wait)
+    print(f"[director 1920x1080] free memory: {f} MB", flush=True)
+    director = selftest_raw(exe, (1920, 1080), DIRECTOR, SWIFTSHADER)
+    ok = ok and good(director)
+    print(f"  {'PASS' if good(director) else 'FAIL'}: {json.dumps(director, ensure_ascii=False)}", flush=True)
+    if do_shots:
+        for name, size, q in SHOTS:
+            wait_for_memory(min_free_mb, max_wait)
+            done = screenshot_raw(exe, size, q + "&nohelp=1", shots_dir / name)
+            print(f"  screenshot {name}: {'ok' if done else 'FAILED'}", flush=True)
+            ok = ok and done
+    return ok, director, {"name": Path(exe).stem, "version": browser_version(exe), "driver": "exe"}
+
+
+# ----------------------------------------------------------------------------- main
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--shots", help="directory for screenshots")
+    ap.add_argument("--no-result", action="store_true", help="do not rewrite results/result.json")
+    ap.add_argument("--min-free-mb", type=int, default=1500)
+    ap.add_argument("--max-wait", type=int, default=900, help="seconds to wait for free memory")
+    ap.add_argument("--raw", action="store_true", help="skip Playwright, launch the browser executable directly")
+    args = ap.parse_args(argv)
+    shots_dir = None
+    if args.shots:
+        shots_dir = Path(args.shots)
+        if not shots_dir.is_absolute():
+            shots_dir = ROOT / shots_dir
+        shots_dir.mkdir(parents=True, exist_ok=True)
+    results = {}
+    lock = shared_lock()
+    with (lock if lock is not None else contextlib.nullcontext()):
+        if lock is None:
+            wait_for_memory(args.min_free_mb, args.max_wait)
+        res = None
+        if not args.raw and playwright_available():
+            res = run_playwright(bool(shots_dir), shots_dir, results)
+        if res is None:
+            exe = find_browser()
+            if not exe:
+                print("no Edge / Chrome found: browser check NOT run")
+                return 2
+            res = run_raw(exe, bool(shots_dir), shots_dir, results, args.min_free_mb, args.max_wait)
+    ok, director, info = res
+    if not args.no_result and results:
+        print("wrote", write_result(results, director, info).relative_to(ROOT).as_posix())
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

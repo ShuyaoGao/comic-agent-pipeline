@@ -1,0 +1,178 @@
+> **{{SERIES_NAME_ZH}} / {{SERIES_NAME_EN}}** 系列
+
+# {{APP_NAME_ZH}}（{{APP_NAME_EN}}）
+
+**{{AUTHOR}}**（{{AUTHOR_EMAIL}}）· {{UNIVERSITY_EN}} · {{UNIVERSITY_KO}}
+代码 MIT · 文档与教学素材 CC BY 4.0
+
+**一句创意 → 9 个 Agent → 剧本、角色、分镜表、导演台俯视图、分镜卡、草样片、质检、成本估算，全程结构化 JSON。**
+用一个可控的多 Agent 工作流，讲清楚“共享状态、检查点与单步重跑、角色一致性怎么量化、成本怎么权衡”。
+电脑和手机都能直接打开：不安装、不联网，所有计算都在你的浏览器里完成。
+
+![流水线跑完：左边是导演台俯视图，右边是成本与多模型调度](docs/img/01-director-1920x1080.png)
+
+> **先说清楚：这是离线演示，不是真实模型。** 页面里的文字由“离线编造器”按规则确定性生成，图片是占位卡片，配音是提示音，
+> 草样片是轮播。它们演示的是**工程闭环、角色一致性机制、成本权衡**，不是文笔和画质。页面不联网、不调用任何 API。
+
+## 怎么打开（不用安装，也不用联网）
+
+- **手机**：打开在线链接 <https://{{GH_USER_LOWER}}.github.io/{{REPO_NAME}}/>（竖屏）。
+- **电脑**：打开同一个在线链接 <https://{{GH_USER_LOWER}}.github.io/{{REPO_NAME}}/>；
+  或在 [Releases](https://github.com/{{GH_USER}}/{{REPO_NAME}}/releases) 下载 `{{REPO_NAME}}-v{{VERSION}}.zip`，解压后双击 `index.html`；
+  或仓库首页点 **Code → Download ZIP**，解压后双击 `play/index.html`。
+
+Windows 用自带的 Edge 打开，Mac 用 Safari 打开（Safari 需要在真实 Mac 上确认，见“常见问题”）。**一定要先解压**，不要在压缩包里直接双击。
+
+## 怎么用
+
+页面顶部三个模式标签，打开时默认是「观看」，会用示例创意自动把 9 个阶段跑一遍：
+
+| 模式 | 你看到什么 | 你能做什么 |
+|---|---|---|
+| **观看**（默认） | 示例创意自动逐个阶段跑一遍：这一阶段的产物，流程图走到哪一步、共享状态 JSON 一段段长出来；跑完自动播草样片 | 暂停；切速度（逐段讲解 / 正常 / 快速 / 瞬间） |
+| **我来编** | 同一套界面 | 写自己的创意、改 seed、换成本档；一键跑完或单步；从任一阶段重跑；导入 3D 导演台导出的镜头；导出 state.json 与生成日志 |
+| **练习** | 7 项任务清单 | 自己的创意跑完 → 换 seed 对比 → 读一致性矩阵 → 触发合规黄牌 → 对比成本档 → 单步重跑 → 导入导演台镜头，完成一项自动打勾 |
+
+过程面板里是：9 个节点的流程图（前 5 个是文本 Agent，后 4 个是确定性规则），以及四个标签——
+**共享状态 JSON**（刚写入的阶段高亮）、**一致性矩阵**（每镜 × 4 项检查）、**成本与调度**（4 个成本档）、**生成日志**（token 数为估算）。
+
+### 电脑（键盘鼠标）
+
+左右两栏：左栏上方是这一阶段的产物（顶部一排阶段标签可以回看任一已完成阶段），下方是创意、seed、成本档、速度和按钮；
+右栏是过程面板。鼠标点流程图的节点可以直接跳到那一阶段的产物，点一致性矩阵的一行会高亮那一镜的分镜图。
+
+| 按键 / 按钮 | 作用 |
+|---|---|
+| ▶ 一键跑完 / ⏭ 单步 / ⏸ 暂停 | 跑完全部 9 个阶段 / 只跑下一个阶段 / 暂停自动运行 |
+| 从 … ↻ 重跑 | 清空选中阶段及之后的产物，用当前创意和 seed 重跑（检查点 + 单步重跑） |
+| ⬆ 导入导演台 JSON / ⬇ 导出 JSON | 用 3D 导演台导出的镜头替换分镜并重跑后三步 / 下载 state.json 与生成日志 |
+| H 或右上角 ? | 再看一次操作说明 |
+| 大屏模式 | 左右比例约 45:55 → 35:65，适合投影 |
+| 3D 导演台 ↗ | 打开第二个页面：拖拽摆角色、机位、灯光，左下角画中画显示机位画面，导出镜头 JSON |
+
+### 手机（触屏，竖屏）
+
+竖屏打开。顶部一行是标题、三个模式标签和 ☰ 菜单（3D 导演台、操作说明、退出）；
+上方是这一阶段的产物，阶段步骤条可以左右滑；往下是创意、seed、成本档和按钮——按钮和输入框都加大到手指能点的尺寸，长表格可以在框内左右滑。
+「观看」模式下过程面板紧跟在产物下方；「我来编 / 练习」里过程面板默认收起，点**「看过程面板」**全屏打开，点「返回」关闭。
+横屏时会提示竖屏体验更佳（也可以选择继续）。手机上不需要键盘，第一次打开弹出的说明是触屏图解。
+
+![手机竖屏（390×844）：顶部一行标签 + ☰ 菜单，产物按宽度排成一列，下面是「看过程面板」和控制区](docs/img/mobile_390x844.png)
+
+## 课堂上怎么用（推荐顺序，约 25 分钟）
+
+1. **观看，逐段讲解速度**（8 分钟）：边走边讲“为什么不用自由对话、而用工作流 + 结构化 JSON”——每个 Agent 只读写共享状态里属于自己的那一段，可检查、可回滚。
+2. **一致性矩阵**（5 分钟）：角色一致性不是一句口号，而是每镜 4 项可复核的检查（seed 复用、参考图复用、固定外貌写进提示词、负面词抑制漂移）。
+   再导入示例导演台导出（它的提示词只写了角色 ID、没写外貌），看得分掉到 {{IMPORT_CONSISTENCY}}。
+3. **成本与调度**（5 分钟）：同一部片，“全量真实视频”与“只给关键镜出真实视频”的视频成本差多少；4 个成本档的估算对比（见下表）。
+4. **练习**（7 分钟）：同学用自己的创意跑一遍，换 seed，触发合规黄牌，单步重跑。
+
+## 它是怎么做的
+
+```
+一句创意
+  → [1] 选题 → [2] 编剧 → [3] 审稿与合规 → [4] 角色设定 → [5] 分镜          （文本 Agent：离线编造器 / 可换成真实模型）
+  → [6] 导演台 → [7] 美术 → [8] 合成 / 后期 → [9] 质检                     （确定性规则）
+  → 运行后：成本估算 + 多模型调度 + 资产库索引
+所有 Agent 读写同一份共享状态（ProjectState）；每步一个检查点，可从任一阶段清空并重跑。
+```
+
+- **两个版本，同一套逻辑**：`src/manhua/` 是 Python 版（`python main.py "你的创意"`，默认离线 mock，也保留了接本地或云端模型的适配器）；
+  `play/js/` 是它 mock 模式的**逐行 JS 移植**（md5、Python 的 MT19937 随机数、Python 的浮点舍入与格式化都按 Python 行为自写）。
+- **逐字段一致**：`tests/test_parity.py` 用 Node.js 跑 JS 版、用 Python 跑原版，对 {{PARITY_CASES}} 组“创意 × seed × 成本档”
+  （覆盖 7 种题材 + 默认题材、合规红线词、emoji、首尾空白、全角字符）比对 state / 生成日志 / 日志汇总 / 成本 / 调度 / 资产库，
+  {{PARITY_COMPARED}} 项全部相同（{{PARITY_PYTHON}} 与 Node {{PARITY_NODE}}，时间戳与绝对路径除外；结果在 `results/parity.json`）。
+- **图片与声音**：Python 版用 Pillow 画占位图、标准库 wave 写占位音轨、合成 GIF；浏览器版用 canvas 现场画同样的卡片和俯视图（同一套 seed → 颜色公式），
+  草样片改为 canvas 轮播，配音提示音用 WebAudio 按同一公式合成。
+
+**实测数字**（来自 `results/result.json`，由 `python -m tools.browser_check` 在 {{BROWSER}} {{BROWSER_VERSION}} 无头模式下跑页面自检生成；都是离线 mock 的结果）：
+
+- 示例创意“{{DEMO_IDEA}}”、seed {{DEMO_SEED}}：题材判为「{{DEMO_GENRE}}」，角色 {{DEMO_CHARS}}，{{DEMO_SHOTS}} 个镜头，成片 {{DEMO_DURATION}} 秒；
+  角色一致性 {{DEMO_CONSISTENCY}}，质检综合 {{DEMO_OVERALL}} / 10；生成日志 {{GEN_TOTAL}} 条（文本 {{GEN_LLM}}、图像 {{GEN_IMG}}、配音 {{GEN_AUDIO}}、草样片 {{GEN_VIDEO}}），
+  token 估算 {{TOK_IN}} 入 / {{TOK_OUT}} 出，实际花费 $0。
+- 若改用真实云端模型生产这部片（单价均为教学示意值，不对应任何厂商报价）：
+
+| 成本档 | 估算总成本 | 真实视频镜数 | 视频成本：全量 → 调度后 |
+|---|---|---|---|
+| 省钱档 | ${{COST_SAVE}} | {{REAL_SAVE}} | ${{FULL_SAVE}} → ${{DISP_SAVE}} |
+| 标准档 | ${{COST_STANDARD}} | {{REAL_STANDARD}} | ${{FULL_STANDARD}} → ${{DISP_STANDARD}} |
+| 高质量档 | ${{COST_PREMIUM}} | {{REAL_PREMIUM}} | ${{FULL_PREMIUM}} → ${{DISP_PREMIUM}} |
+| 全量真实视频 | ${{COST_ALL_REAL}} | {{REAL_ALL_REAL}} | ${{FULL_ALL_REAL}} → ${{DISP_ALL_REAL}} |
+
+- 带“同款 / 照搬 / 翻拍”的创意，审稿 Agent 判定为 `{{WARN_STATUS}}`：{{WARN_NOTE}}
+- 审稿阶段的“八维质量评分”在离线模式里是写死的常量，页面上标为“离线示意分，不是模型评出来的”。
+
+![合成阶段：草样片轮播、剪辑时间线与一致性矩阵](docs/img/02-compose-1920x1080.png)
+
+## 想自己运行或修改
+
+浏览器版没有编译步骤，改完 `play/` 直接刷新。Python 版（需要 Python 3.10+）：
+
+```bash
+pip install -r requirements.txt
+python main.py "末日里少女带着会说话的猫寻找信号源" --seed 42      # 离线 mock，产物在 output/<项目>/（含 viewer.html 看板）
+python main.py --resume <项目ID> --from storyboard                 # 从分镜阶段重跑
+python main.py --resume <项目ID> --storyboard-from director_export.json   # 用 3D 导演台导出的镜头重跑 美术→合成→质检
+python -m pytest -q                                                # 全部测试（12 个脚本各一个用例；JS 比对需要 Node.js，没有则跳过）
+python tests/run_all.py                                             # 同一批测试，不用 pytest
+python tests/test_parity.py --write-result                          # 重新生成 results/parity.json
+python -m tools.browser_check --shots docs/img                      # 用本机 Edge（Playwright）无头跑页面自检，重新生成 results/result.json 和电脑截图
+python -m tools.mobile_check_cap --shots docs/img                   # 手机 4 个尺寸 + 横屏 + 电脑 2 个尺寸的验收，重新生成手机截图
+python -m tools.build --release                                     # 重新生成 play/js/credits.js、示例导出与 release/*.zip
+```
+
+接真实模型：`config.yaml` 里 `runtime.mode` 可改成 `ollama`（本地）或 `real`（云端，需要在 `.env` 填密钥）；
+其中出现的模型名和价格都是**可配置示例**，接入前请到各家官网核对。浏览器版始终只用离线编造器。
+
+## 目录结构
+
+```
+index.html              仓库根目录入口：自动跳到 play/index.html（在线链接和解压后双击都用它）
+play/                   双击即玩的静态页面（Release zip = 这个目录 + 根目录 index.html）
+  index.html            流水线页面          director.html   3D 导演台页面
+  names.js              页面上的名称（中性模型名、各阶段说明）
+  js/pyrt.js            md5、Python MT19937、Python 浮点舍入 / 格式化、按码点的字符串工具
+  js/mock_llm.js        5 个文本 Agent 的离线编造器（mock.py + writers.py 的移植）
+  js/pipeline.js        工作流引擎 + 导演台 / 美术 / 合成 / 质检 / 成本 / 调度 / 资产库 / 导演台导入
+  js/render.js          canvas 分镜卡、俯视图、草样片轮播，WebAudio 提示音
+  js/app.js             页面外壳：模式、过程面板、练习、说明、退出、自检
+  js/mobile.js          手机 / 触屏通用工具（☰ 菜单、全屏面板、横屏提示、按下反馈、防误触）
+  js/presets.js         4 个成本档        css/app.css  电脑布局   css/mobile.css  手机布局   vendor/three/  three.js r128（MIT）
+src/manhua/             Python 版（工作流引擎、9 个 Agent、离线 mock / 本地 / 云端适配器）
+main.py  config.yaml  .env.example  requirements.txt  library_tool.py
+tools/                  导演台导入校验、构建、浏览器自检与截图（browser_check）、手机 / 电脑尺寸验收（mobile_check、mobile_check_cap）、占位替换
+tests/                  12 个测试脚本（python -m pytest -q 或 python tests/run_all.py）+ JS / Python 比对用例
+results/                result.json（页面自检）与 parity.json（逐字段比对）—— README 里的数字都来自这里
+docs/img/               截图（电脑 1920×1080、1366×768，手机 390×844）
+```
+
+## 常见问题
+
+- **关掉页面后还有程序在跑吗？** 没有。离线版是纯静态网页，关掉标签页就全部结束，不留后台进程；右上角（手机在 ☰ 菜单里）的“退出”会先停下所有计算再尝试关闭页面。
+- **页面会联网或上传我写的创意吗？** 不会。所有计算都在浏览器里完成，不调用任何 API。
+- **双击 index.html 却用记事本打开了？** 右键 →「打开方式」→ 选浏览器。
+- **手机上怎么用？** 竖屏打开在线链接；「观看」直接看，「我来编」里改创意、点「▶ 一键跑完」，点「看过程面板」看流程图和共享状态。
+- **为什么不同电脑上图片里的文字字体不一样？** 分镜卡用系统字体绘制；JSON 产物与字体无关，同一创意 + 同一 seed 在任何电脑上都相同。
+- **Mac 上能用吗？** 页面只用标准 Web 接口，但目前只在 Windows 的 Edge（Chromium 内核）上自动测试过；Safari 和 Firefox **未测**，需要在真实 Mac 上确认一次。
+  3D 导演台需要浏览器支持 WebGL。
+- **评分和 token 为什么这么“整齐”？** 离线编造器的审稿分数是写死的示意值，token 按字数估算（约 2 字 1 token），都不是模型给出的。
+
+## 许可证与引用
+
+代码 MIT（[LICENSE](LICENSE)），文档与教学素材（README、docs/、页面文字、截图）CC BY 4.0（[LICENSE-docs](LICENSE-docs)），使用请注明出处。
+引用信息见 [CITATION.cff](CITATION.cff)（GitHub 右侧的 “Cite this repository”）。第三方说明见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+
+## AI 辅助开发声明
+
+代码由 Claude Code 辅助编写，经作者审阅。
+
+## English summary
+
+**{{APP_NAME_EN}}** is a teaching demo ({{SERIES_NAME_EN}}) by {{AUTHOR}}, {{UNIVERSITY_EN}}. One idea goes through a
+controllable 9-agent workflow (idea, script, review & compliance, characters, storyboard, director board, art, compose,
+quality check) that reads and writes one shared structured state, with checkpoints and re-runs from any stage. The
+browser version (`play/index.html`, double-click, offline; also laid out for phones in portrait) is a line-by-line
+JavaScript port of the Python pipeline's deterministic mock mode — verified field by field against Python on
+{{PARITY_CASES}} idea/seed/preset cases — and shows a live pipeline panel, a character-consistency matrix, cost presets
+with multi-model dispatch, and a 3D director stage (three.js r128). Text is rule-generated and images are placeholders:
+it demonstrates the engineering loop, not output quality. Code: MIT; docs: CC BY 4.0.

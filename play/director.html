@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>3D 导演台</title>
+<!--
+  3D 导演台（需求文档第六章「平台最差异化的功能」）——可拖拽摆位版，浏览器离线版。
+    a) 角色 / 📷机位 / 💡灯光 都可鼠标拖拽摆位（raycaster + 地面拖拽平面）；
+    b) 点选对象弹出属性面板，微调 朝向 / 高度 / 焦距 / 灯高；
+    c) 左下角画中画实时显示「当前机位看到的画面」（第二个 PerspectiveCamera + scissor 视口，9:16）；
+    d) 导出的镜头 JSON 严格对齐 schemas.Shot：可在流水线页面「导入导演台 JSON」，也可给 Python 版
+       python main.py --resume <项目> --storyboard-from director_export.json；
+    e) three.js 用随包附带的本地文件（vendor/three/three.min.js，r128，MIT），不连 CDN，双击即可用。
+       由 tools/director_stage.html（three@0.160 ESM 版）移植：r128 没有 CapsuleGeometry，小人身体改用圆柱 + 两个半球拼成。
+
+  机位语义双向同步：
+    - 拖拽机位 → 按「与主角的距离」自动推导 景别（远景…特写），按「机位高度」推导 俯视/平视/仰视，回写到表单；
+    - 改表单的 景别/机位 下拉 → 摄像机自动移动到对应距离/高度（侧后方会绕到主角身后）。
+    - 焦距滑杆会把「35mm 标准焦段」等镜头语言追加进 image_prompt（不破坏 Shot 结构）。
+-->
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Microsoft YaHei",system-ui,sans-serif;background:#0f1216;color:#e7edf3;display:flex;height:100vh;overflow:hidden}
+  #stage{flex:1;position:relative;background:#0a0d11}
+  #notice{position:absolute;top:12px;left:12px;right:12px;background:#3a2c1a;color:#ffd699;padding:8px 12px;border-radius:8px;font-size:13px;display:none;z-index:5}
+  #help{position:absolute;top:12px;left:12px;background:#10161dcc;color:#9bb0c3;padding:6px 10px;border-radius:8px;font-size:12px;z-index:4;pointer-events:none}
+  #pipFrame{position:absolute;left:12px;bottom:12px;border:2px solid #2f6df6;border-radius:6px;pointer-events:none;display:none;z-index:4}
+  #pipLabel{position:absolute;left:12px;background:#10161dcc;color:#bfe0ff;padding:3px 8px;border-radius:6px;font-size:12px;pointer-events:none;display:none;z-index:4}
+  #panel{width:360px;overflow-y:auto;padding:16px;background:#141a20;border-left:1px solid #222b34}
+  h1{font-size:18px;margin:0 0 4px} .sub{color:#9bb0c3;font-size:12px;margin-bottom:12px}
+  label{display:block;font-size:12px;color:#9bb0c3;margin:10px 0 3px}
+  input,select,textarea{width:100%;background:#0f151b;color:#e7edf3;border:1px solid #2a333d;border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit}
+  input[type=range]{padding:0}
+  .row{display:flex;gap:8px}.row>div{flex:1}
+  fieldset{border:1px solid #232b34;border-radius:8px;margin:12px 0;padding:8px 12px}
+  legend{color:#6cb6ff;font-size:13px;padding:0 6px}
+  #propsBox legend{color:#ffd95c}
+  button{width:100%;margin-top:12px;background:#2f6df6;color:#fff;border:0;border-radius:8px;padding:10px;font-size:14px;cursor:pointer}
+  button.ghost{background:#243140;color:#bfe0ff}
+  .topline{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+  .back{color:#9cc6ff;text-decoration:none} .back:hover{text-decoration:underline}
+  .exit{width:auto;margin:0;border:1px solid #6b2b2b;background:#3a1f1f;color:#ffb4b0;border-radius:8px;padding:4px 14px;font-size:13px}
+  #credits{color:#6b7d8f;font-size:11px;margin-top:14px;line-height:1.5}
+  #ended{display:none;position:fixed;inset:0;z-index:50;background:#111;color:#ddd;align-items:center;justify-content:center;text-align:center}
+  #ended.show{display:flex} #ended h2{font-size:24px;margin-bottom:8px}
+  pre{white-space:pre-wrap;background:#0a0d11;border:1px solid #232b34;border-radius:8px;padding:10px;font-size:11px;max-height:220px;overflow:auto}
+  .hint{color:#7a8d9f;font-size:11px;margin-top:4px}
+  /* 手机 / 窄屏：上方 3D 舞台按宽度缩放、下方表单整页上下滚动；按钮和输入框触控区 ≥ 44px */
+  @media (max-width: 980px) and (pointer: coarse), (max-width: 700px) {
+    body{flex-direction:column;height:auto;min-height:100dvh;overflow-x:hidden;overflow-y:auto}
+    #stage{flex:none;height:52vh;min-height:280px;touch-action:none}
+    #panel{width:100%;flex:none;border-left:0;border-top:1px solid #222b34;padding:12px 12px calc(env(safe-area-inset-bottom) + 12px)}
+    #help{font-size:11px;right:12px}
+    input,select,textarea{min-height:44px;font-size:16px} label{font-size:14px}
+    button{min-height:44px} .exit{min-height:40px;font-size:14px}
+    pre{max-height:160px}
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="notice"></div>
+  <div id="help">拖拽 角色/📷机位/💡灯光 摆位 ｜ 点选对象→右侧属性面板 ｜ 空白处拖动旋转视角，滚轮缩放</div>
+  <div id="pipFrame"></div>
+  <div id="pipLabel">📷 当前机位画面（9:16 实时）</div>
+</div>
+
+<div id="panel">
+  <div class="topline"><a class="back" href="index.html">← 返回流水线</a><button class="exit" id="exit-btn" title="停止渲染并关闭页面">退出</button></div>
+  <h1>3D 导演台 · 可拖拽摆位</h1>
+  <div class="sub">拖拽摆 角色/机位/灯光 → 实时机位画面 → 导出结构化镜头 JSON（需求文档第六章）</div>
+
+  <fieldset><legend>镜头信息</legend>
+    <div class="row"><div><label>镜号 shot_id</label><input id="shot_id" value="S01"></div>
+      <div><label>时长 duration</label><input id="duration" value="5s"></div></div>
+    <label>所属场景 scene</label><input id="scene" value="教学楼天台">
+    <label>出场角色 character_id（逗号分隔，改完即重摆 3D 小人）</label><input id="characters" value="CHAR_001,CHAR_002">
+    <label>动作 action</label><input id="action" value="林未央缓步走向走廊尽头，忽然警觉地回头">
+    <label>对白/旁白 dialogue（可空）</label><input id="dialogue" value="CHAR_001：……这里到底发生过什么？">
+    <label>情绪 emotion</label><input id="emotion" value="紧张悬疑">
+  </fieldset>
+
+  <fieldset><legend>摄像机（拖拽📷机位会自动推导回写）</legend>
+    <label>景别 shot_size</label>
+    <select id="shot_size"><option>远景</option><option>全景</option><option selected>中景</option><option>近景</option><option>特写</option></select>
+    <label>机位 angle</label>
+    <select id="angle"><option selected>平视</option><option>俯视</option><option>仰视</option><option>侧后方</option></select>
+    <label>运镜 movement</label>
+    <select id="movement"><option>推</option><option>拉</option><option>摇</option><option>移</option><option>跟拍</option><option selected>缓慢推进</option><option>环绕</option><option>定镜</option></select>
+    <div class="hint">改下拉 → 摄像机移动到对应距离/高度；拖拽📷 → 反向推导景别/机位回写到这里。</div>
+  </fieldset>
+
+  <fieldset><legend>灯光（💡可拖拽，方位会写进提示词）</legend>
+    <label>主光 key_light</label>
+    <select id="key_dir"><option selected>冷蓝侧光</option><option>暖橙侧光</option><option>顶光</option><option>逆光</option><option>正面平光</option></select>
+    <label>轮廓光 rim_light</label>
+    <select id="rim"><option selected>弱白色轮廓光</option><option>冷蓝轮廓光</option><option>暖金轮廓光</option><option>无</option></select>
+    <label>强度 intensity</label>
+    <select id="intensity"><option>弱</option><option selected>中等</option><option>强</option></select>
+  </fieldset>
+
+  <fieldset id="propsBox" style="display:none"><legend>选中对象属性</legend>
+    <div id="props"></div>
+  </fieldset>
+
+  <button onclick="genShot()">① 生成本镜 JSON + 提示词</button>
+  <button class="ghost" onclick="addShot()">② 加入镜头序列（当前 <span id="cnt">0</span> 镜）</button>
+  <button class="ghost" onclick="downloadAll()">③ 导出全部镜头（storyboard JSON）</button>
+  <div class="sub" style="margin-top:10px">导出后回流水线：回到<a class="back" href="index.html">流水线页面</a>，点「⬆ 导入导演台 JSON」，
+    会用这些镜头重跑 美术 → 合成 → 质检。<br>Python 版：<code>python main.py --resume &lt;项目&gt; --storyboard-from director_export.json</code></div>
+  <pre id="out">点击①生成镜头 JSON…</pre>
+  <div id="credits"></div>
+</div>
+<div id="ended"><div><h2>已停止运行</h2><p>所有计算都已结束，可以直接关闭这个标签页。</p></div></div>
+<script src="vendor/three/three.min.js"></script>
+<script src="js/credits.js"></script>
+
+<script>
+// ============ 纯 JS：表单 → 镜头 JSON（零依赖，断网也能用）============
+// 导出结构严格对齐 src/manhua/schemas.py 的 Shot（需求文档附录 12.2），
+// 经 tools/import_storyboard.py 严格 Pydantic 校验后可喂回流水线。
+const DEFAULT_NEG = "不要字幕,不要角色漂移,不要多出人物,不要手部畸形,不要改变发色瞳色服装";
+const $ = id => document.getElementById(id);
+let shots = [];
+// 3D 侧推导出的镜头语言片段（无 3D / 断网时为空串，导出仍完整可用）
+let focalHint = "";     // 如 "35mm 标准焦段自然透视"
+let lightDirNote = "";  // 如 "左前方"
+
+function buildShot() {
+  const scene = $("scene").value.trim();
+  const chars = $("characters").value.split(/[，,]/).map(s => s.trim()).filter(Boolean);
+  const cam = { shot_size: $("shot_size").value, angle: $("angle").value, movement: $("movement").value };
+  // 灯光方位来自 💡 拖拽（仅追加进字符串描述，结构不变，保持 Shot 兼容）
+  const keyLightText = lightDirNote ? `${$("key_dir").value}（${lightDirNote}）` : $("key_dir").value;
+  const light = { key_light: keyLightText, rim_light: $("rim").value, intensity: $("intensity").value };
+  const action = $("action").value.trim();
+  const emotion = $("emotion").value.trim();
+  const dialogue = $("dialogue").value.trim();
+  const lens = focalHint ? `${focalHint}；` : "";
+  // 与分镜 Agent 一致的提示词拼装（结构化参数 → 提示词）
+  const image_prompt =
+    `${scene}，${cam.shot_size}${cam.angle}，${keyLightText}+${light.rim_light}，` +
+    `人物：${chars.join("、")}；动作：${action}；情绪：${emotion}；${lens}漫剧风格，竖屏构图，电影感打光`;
+  const video_prompt =
+    `${image_prompt}；镜头运动：${cam.movement}；时长 ${$("duration").value}；保持人物外貌与服装一致，首帧=该镜分镜图`;
+  return {
+    shot_id: $("shot_id").value.trim(), scene, characters: chars,
+    camera: cam, lighting: light, action, duration: $("duration").value.trim(),
+    negative_prompt: DEFAULT_NEG, emotion, dialogue, image_prompt, video_prompt,
+  };
+}
+function genShot(){ $("out").textContent = JSON.stringify(buildShot(), null, 2); }
+function addShot(){ shots.push(buildShot()); $("cnt").textContent = shots.length;
+  // 自动把镜号 +1，方便连续摆镜
+  const m = $("shot_id").value.match(/^S(\d+)$/); if(m){ $("shot_id").value = "S"+String(+m[1]+1).padStart(2,"0"); }
+  $("out").textContent = "已加入 "+shots.length+" 镜：\n"+shots.map(s=>s.shot_id+" "+s.scene).join("\n");
+}
+function downloadAll(){
+  const data = shots.length ? {shots} : {shots:[buildShot()]};
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:"application/json"});
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = "director_export.json"; a.click();
+}
+
+// ============ Three.js 3D 交互（本地 vendor/three/three.min.js，r128）============
+let stopRender = false;
+(function (THREE) {
+  if (!THREE) throw new Error("three.js 没有加载（vendor/three/three.min.js 缺失）");
+  const stage = $("stage");
+  const W = () => stage.clientWidth, H = () => stage.clientHeight;
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(W(), H()); renderer.setPixelRatio(devicePixelRatio);
+  stage.appendChild(renderer.domElement);
+  const scene3 = new THREE.Scene(); scene3.background = new THREE.Color(0x0a0d11);
+
+  // ---- 编辑视角相机（观察者）：球坐标轨道，拖空白处旋转、滚轮缩放 ----
+  const editorCam = new THREE.PerspectiveCamera(45, W()/H(), 0.1, 200);
+  const orbit = { theta: 0.5, phi: 1.05, radius: 12, target: new THREE.Vector3(0, 1, 0) };
+  function applyOrbit(){
+    const {theta, phi, radius, target} = orbit;
+    editorCam.position.set(
+      target.x + radius * Math.sin(phi) * Math.sin(theta),
+      target.y + radius * Math.cos(phi),
+      target.z + radius * Math.sin(phi) * Math.cos(theta));
+    editorCam.lookAt(target);
+  }
+
+  // ---- 舞台：网格 + 地面 ----
+  const grid = new THREE.GridHelper(20, 20, 0x2a3a4a, 0x1a242e); scene3.add(grid);
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(5, 48),
+    new THREE.MeshStandardMaterial({color:0x12181f}));
+  ground.rotation.x = -Math.PI/2; ground.position.y = -0.01; scene3.add(ground);
+
+  // ---- 角色小人（可拖拽，列表跟随表单 characters 字段）----
+  const PALETTE = [0x4f8cff, 0xff8a5c, 0x7ddc7d, 0xd59cff, 0xffd95c, 0x6ce8d8];
+  let charObjs = [];   // [{id, group}]
+  function makeLabel(text, colorHex){
+    const cv = document.createElement("canvas"); cv.width = 256; cv.height = 56;
+    const g = cv.getContext("2d");
+    g.fillStyle = "rgba(10,13,17,.72)"; g.fillRect(0,0,256,56);
+    g.fillStyle = "#"+colorHex.toString(16).padStart(6,"0");
+    g.font = "bold 30px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText(text, 128, 30);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({map: new THREE.CanvasTexture(cv), depthTest:false}));
+    sp.scale.set(1.5, 0.33, 1); sp.position.y = 2.45; return sp;
+  }
+  function makeChar(id, color, x, z){
+    const g = new THREE.Group();
+    const bodyMat = new THREE.MeshStandardMaterial({color});
+    const body = new THREE.Group();          // r128 没有 CapsuleGeometry：圆柱 + 上下两个球拼成胶囊
+    body.add(new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 1.0, 12), bodyMat));
+    const capTop = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 8), bodyMat); capTop.position.y = 0.5; body.add(capTop);
+    const capBot = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 8), bodyMat); capBot.position.y = -0.5; body.add(capBot);
+    body.position.y = 0.9; g.add(body);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 24, 24),
+      new THREE.MeshStandardMaterial({color:0xe7d2b0})); head.position.y = 1.85; g.add(head);
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.2, 12),
+      new THREE.MeshStandardMaterial({color:0xff7755}));
+    nose.position.set(0, 1.85, 0.32); nose.rotation.x = Math.PI/2; g.add(nose);  // 鼻尖=面朝 +Z
+    g.add(makeLabel(id, color));
+    g.position.set(x, 0, z);
+    g.userData = {draggable:true, type:"char", id};
+    scene3.add(g); return g;
+  }
+  function syncChars(){
+    const ids = $("characters").value.split(/[，,]/).map(s=>s.trim()).filter(Boolean);
+    // 删掉不存在的，保留已有摆位，新角色按序排开
+    charObjs = charObjs.filter(c => { if(!ids.includes(c.id)){ scene3.remove(c.group); return false; } return true; });
+    ids.forEach((id, i) => {
+      if(!charObjs.find(c=>c.id===id)){
+        const g = makeChar(id, PALETTE[i % PALETTE.length], (i - (ids.length-1)/2) * 1.4, 0);
+        charObjs.push({id, group: g});
+      }
+    });
+    if(selected && selected.userData.type==="char" && !ids.includes(selected.userData.id)) select(null);
+  }
+  $("characters").addEventListener("input", syncChars);
+
+  // ---- 📷 机位（可拖拽）+ 镜头相机（画中画用）----
+  const camRig = new THREE.Group();
+  const camBody = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.3, 0.6),
+    new THREE.MeshStandardMaterial({color:0x6cb6ff}));
+  const camLens = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.34, 16),
+    new THREE.MeshStandardMaterial({color:0x2f6df6}));
+  camLens.rotation.x = -Math.PI/2; camLens.position.z = -0.45;   // 锥尖朝 -Z（拍摄方向由 lookAt 决定，仅示意）
+  camRig.add(camBody, camLens); camRig.add(makeLabel("📷 机位", 0x6cb6ff));
+  camRig.position.set(0, 1.6, 5);
+  camRig.userData = {draggable:true, type:"camera"};
+  scene3.add(camRig);
+
+  let focal = 35;   // 焦距 mm（属性面板可调，写进 image_prompt）
+  const fovFromFocal = f => 2 * Math.atan(12 / f) * 180 / Math.PI;  // 35mm 画幅半高 12mm 的示意换算
+  const shotCam = new THREE.PerspectiveCamera(fovFromFocal(focal), 9/16, 0.1, 100);
+  scene3.add(shotCam);
+  const camHelper = new THREE.CameraHelper(shotCam); scene3.add(camHelper);
+
+  // ---- 💡 灯光（可拖拽小太阳 + 真实平行光）----
+  const lightGizmo = new THREE.Group();
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 16),
+    new THREE.MeshBasicMaterial({color:0xffe9a0}));
+  lightGizmo.add(bulb); lightGizmo.add(makeLabel("💡 主光", 0xffd95c));
+  lightGizmo.position.set(3, 3, 2);
+  lightGizmo.userData = {draggable:true, type:"light"};
+  scene3.add(lightGizmo);
+
+  scene3.add(new THREE.AmbientLight(0xffffff, 0.35));
+  const key = new THREE.DirectionalLight(0x99bbff, 1.0); scene3.add(key, key.target);
+  const rim = new THREE.DirectionalLight(0xffffff, 0.4); rim.position.set(-3, 4, -4); scene3.add(rim);
+
+  // ---- 选中高亮环 + 属性面板 ----
+  const selRing = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.7, 36),
+    new THREE.MeshBasicMaterial({color:0xffd95c, side:THREE.DoubleSide}));
+  selRing.rotation.x = -Math.PI/2; selRing.visible = false; scene3.add(selRing);
+  let selected = null;
+
+  function select(obj){
+    selected = obj;
+    const box = $("propsBox"), p = $("props");
+    if(!obj){ box.style.display = "none"; selRing.visible = false; return; }
+    box.style.display = "block"; selRing.visible = true;
+    const t = obj.userData.type;
+    if(t === "char"){
+      const deg = Math.round(obj.rotation.y * 180 / Math.PI);
+      p.innerHTML = `<div class="hint">角色 ${obj.userData.id}（拖拽改站位）</div>
+        <label>朝向（°，0=面向画面外）: <span id="pv_rot">${deg}</span></label>
+        <input type="range" id="pr_rot" min="-180" max="180" step="5" value="${deg}">`;
+      $("pr_rot").addEventListener("input", e => {
+        obj.rotation.y = e.target.value * Math.PI / 180;
+        $("pv_rot").textContent = e.target.value;
+      });
+    } else if(t === "camera"){
+      p.innerHTML = `<div class="hint">📷 机位（拖拽改水平位置；下面微调高度/焦距）</div>
+        <label>机位高度: <span id="pv_h">${camRig.position.y.toFixed(1)}</span> m</label>
+        <input type="range" id="pr_h" min="0.3" max="6" step="0.1" value="${camRig.position.y}">
+        <label>焦距: <span id="pv_f">${focal}</span> mm（视角 <span id="pv_fov">${fovFromFocal(focal).toFixed(0)}</span>°）</label>
+        <input type="range" id="pr_f" min="18" max="135" step="1" value="${focal}">
+        <div class="hint" id="pv_lens"></div>`;
+      $("pr_h").addEventListener("input", e => {
+        camRig.position.y = +e.target.value;
+        $("pv_h").textContent = (+e.target.value).toFixed(1);
+        syncFormFromCamera();
+      });
+      $("pr_f").addEventListener("input", e => {
+        focal = +e.target.value;
+        $("pv_f").textContent = focal;
+        $("pv_fov").textContent = fovFromFocal(focal).toFixed(0);
+        updateFocalHint();
+      });
+      updateFocalHint();
+    } else if(t === "light"){
+      p.innerHTML = `<div class="hint">💡 主光（拖拽改方位，方位写进提示词）</div>
+        <label>灯光高度: <span id="pv_lh">${lightGizmo.position.y.toFixed(1)}</span> m</label>
+        <input type="range" id="pr_lh" min="0.5" max="8" step="0.1" value="${lightGizmo.position.y}">`;
+      $("pr_lh").addEventListener("input", e => {
+        lightGizmo.position.y = +e.target.value;
+        $("pv_lh").textContent = (+e.target.value).toFixed(1);
+        updateLightNote();
+      });
+    }
+  }
+
+  function updateFocalHint(){
+    const desc = focal < 24 ? "广角空间感" : focal <= 50 ? "标准焦段自然透视"
+               : focal <= 85 ? "中长焦人像感" : "长焦浅景深压缩感";
+    focalHint = `${focal}mm ${desc}`;
+    const el = $("pv_lens"); if(el) el.textContent = "将写入提示词：" + focalHint;
+  }
+  updateFocalHint();
+
+  function updateLightNote(){
+    const {x, z} = lightGizmo.position;
+    const lr = x < -0.8 ? "左" : x > 0.8 ? "右" : "";
+    const fb = z > 0.8 ? "前" : z < -0.8 ? "后" : "";
+    lightDirNote = (lr + fb) ? (lr + fb + "方") : "正上方";
+  }
+  updateLightNote();
+
+  // ---- 机位语义 双向同步 ----
+  const DIST_OF_SIZE = {远景:9, 全景:6, 中景:4, 近景:2.6, 特写:1.7};
+  const sizeFromDist = d => d < 2.1 ? "特写" : d < 3.2 ? "近景" : d < 4.8 ? "中景" : d < 7.2 ? "全景" : "远景";
+  const HEIGHT_OF_ANGLE = {俯视:4.2, 平视:1.6, 仰视:0.5, 侧后方:2.0};
+  const angleFromHeight = y => y > 2.8 ? "俯视" : y < 0.9 ? "仰视" : "平视";
+  const mainChar = () => charObjs[0] ? charObjs[0].group.position : new THREE.Vector3(0,0,0);
+  const lookTarget = () => { const m = mainChar(); return new THREE.Vector3(m.x, 1.45, m.z); };
+
+  let syncing = false;   // 防止「拖拽回写表单」再触发「表单移动机位」死循环
+  function syncFormFromCamera(){
+    syncing = true;
+    const m = mainChar();
+    const d = Math.hypot(camRig.position.x - m.x, camRig.position.z - m.z);
+    $("shot_size").value = sizeFromDist(d);
+    $("angle").value = angleFromHeight(camRig.position.y);
+    syncing = false;
+  }
+  function applyFormToCamera(){
+    if(syncing) return;
+    const m = mainChar();
+    const d = DIST_OF_SIZE[$("shot_size").value] || 4;
+    const a = $("angle").value;
+    if(a === "侧后方"){
+      // 绕到主角身后侧 135°（以主角朝向为准）
+      const facing = charObjs[0] ? charObjs[0].group.rotation.y : 0;
+      const ang = facing + Math.PI * 0.75;
+      camRig.position.set(m.x + Math.sin(ang) * d, HEIGHT_OF_ANGLE[a], m.z + Math.cos(ang) * d);
+    } else {
+      // 保持当前水平方向，仅改距离与高度
+      let dx = camRig.position.x - m.x, dz = camRig.position.z - m.z;
+      const len = Math.hypot(dx, dz) || 1; dx /= len; dz /= len;
+      camRig.position.set(m.x + dx * d, HEIGHT_OF_ANGLE[a] ?? camRig.position.y, m.z + dz * d);
+    }
+    if(selected === camRig) select(camRig);   // 刷新属性面板里的高度值
+  }
+  $("shot_size").addEventListener("input", applyFormToCamera);
+  $("angle").addEventListener("input", applyFormToCamera);
+
+  // ---- 灯光选项 → 颜色/强度/预设位置 ----
+  function applyLightForm(){
+    const dir = $("key_dir").value, inten = $("intensity").value;
+    key.intensity = {弱:0.5, 中等:1.0, 强:1.7}[inten] || 1.0;
+    key.color.set(dir.includes("暖") ? 0xffd9a0 : dir.includes("正面") ? 0xffffff : 0x99bbff);
+    const pos = {"冷蓝侧光":[3,3,2], "暖橙侧光":[3,3,2], "顶光":[0,6,0], "逆光":[0,3,-5], "正面平光":[0,3,5]}[dir];
+    if(pos) lightGizmo.position.set(...pos);
+    updateLightNote();
+    if(selected === lightGizmo) select(lightGizmo);
+  }
+  $("key_dir").addEventListener("input", applyLightForm);
+  $("intensity").addEventListener("input", applyLightForm);
+  applyLightForm();
+
+  // ---- 拖拽交互：raycaster + 地面拖拽平面（y=0）----
+  const ray = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const hitPoint = new THREE.Vector3();
+  const draggables = () => [...charObjs.map(c=>c.group), camRig, lightGizmo];
+  let dragging = null, orbiting = false, px = 0, py = 0;
+
+  function setNDC(e){
+    const r = renderer.domElement.getBoundingClientRect();
+    ndc.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+    ndc.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+  }
+  function rootDraggable(o){
+    while(o){ if(o.userData && o.userData.draggable) return o; o = o.parent; }
+    return null;
+  }
+  renderer.domElement.addEventListener("pointerdown", e => {
+    setNDC(e); ray.setFromCamera(ndc, editorCam);
+    const hits = ray.intersectObjects(draggables(), true);
+    const root = hits.length ? rootDraggable(hits[0].object) : null;
+    if(root){ select(root); dragging = root; }
+    else { orbiting = true; select(null); }
+    px = e.clientX; py = e.clientY;
+    renderer.domElement.setPointerCapture(e.pointerId);
+  });
+  renderer.domElement.addEventListener("pointermove", e => {
+    if(dragging){
+      setNDC(e); ray.setFromCamera(ndc, editorCam);
+      if(ray.ray.intersectPlane(dragPlane, hitPoint)){
+        // 限制在合理范围内（角色限舞台内；机位/灯光可退远以摆远景）；高度用属性面板微调
+        const maxR = dragging === camRig ? 9.5 : dragging === lightGizmo ? 8 : 4.8;
+        const r = Math.hypot(hitPoint.x, hitPoint.z);
+        if(r > maxR){ hitPoint.multiplyScalar(maxR / r); }
+        dragging.position.x = hitPoint.x; dragging.position.z = hitPoint.z;
+        if(dragging === camRig) syncFormFromCamera();
+        if(dragging === lightGizmo) updateLightNote();
+      }
+    } else if(orbiting){
+      orbit.theta -= (e.clientX - px) * 0.006;
+      orbit.phi = Math.min(1.45, Math.max(0.25, orbit.phi - (e.clientY - py) * 0.004));
+      px = e.clientX; py = e.clientY;
+    }
+  });
+  addEventListener("pointerup", () => { dragging = null; orbiting = false; });
+  renderer.domElement.addEventListener("wheel", e => {
+    e.preventDefault();
+    orbit.radius = Math.min(28, Math.max(3.5, orbit.radius * (1 + e.deltaY * 0.001)));
+  }, {passive:false});
+
+  // ---- 画中画（当前机位画面，9:16）：scissor 视口 + 第二相机 ----
+  const pipFrame = $("pipFrame"), pipLabel = $("pipLabel");
+  pipFrame.style.display = "block"; pipLabel.style.display = "block";
+  function pipRect(){
+    const h = Math.round(H() * 0.38), w = Math.round(h * 9 / 16);
+    return {x: 12, y: 12, w, h};
+  }
+  function layoutPip(){
+    const r = pipRect();
+    pipFrame.style.width = r.w + "px"; pipFrame.style.height = r.h + "px";
+    pipLabel.style.bottom = (r.h + 18) + "px";
+  }
+  layoutPip();
+  function setGizmosVisible(v){
+    camRig.visible = v; camHelper.visible = v; lightGizmo.visible = v;
+    grid.visible = v; selRing.visible = v && !!selected;
+    charObjs.forEach(c => c.group.children.forEach(ch => { if(ch.isSprite) ch.visible = v; }));
+  }
+
+  addEventListener("resize", () => {
+    renderer.setSize(W(), H());
+    editorCam.aspect = W()/H(); editorCam.updateProjectionMatrix();
+    layoutPip();
+  });
+
+  (function loop(){
+    if (stopRender) return;
+    requestAnimationFrame(loop);
+    // 选中环跟随
+    if(selected){ selRing.position.set(selected.position.x, 0.02, selected.position.z); }
+    // 镜头相机 = 📷机位位置 + 看向主角头部 + 焦距
+    shotCam.position.copy(camRig.position);
+    shotCam.lookAt(lookTarget());
+    shotCam.fov = fovFromFocal(focal); shotCam.updateProjectionMatrix();
+    camHelper.update();
+    applyOrbit();
+
+    // 主视口（编辑视角，显示全部辅助物）
+    const w = W(), h = H();
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, w, h);
+    setGizmosVisible(true);
+    renderer.render(scene3, editorCam);
+
+    // 画中画（机位实拍视角，隐藏辅助物，9:16）
+    const r = pipRect();
+    renderer.setScissorTest(true);
+    renderer.setViewport(r.x, r.y, r.w, r.h);
+    renderer.setScissor(r.x, r.y, r.w, r.h);
+    setGizmosVisible(false);
+    renderer.render(scene3, shotCam);
+    renderer.setScissorTest(false);
+  })();
+
+  syncChars();
+  applyFormToCamera();
+  applyOrbit();
+  window.__stage = { renderer, scene3, charObjs: () => charObjs, camRig, lightGizmo };
+})(window.THREE);
+
+// 退出：停渲染循环、释放 WebGL，显示结束页
+$("exit-btn").addEventListener("click", () => {
+  stopRender = true;
+  const st = window.__stage;
+  if (st) { try { st.renderer.dispose(); st.renderer.forceContextLoss(); } catch (e) {} }
+  try { window.close(); } catch (e) {}
+  setTimeout(() => { document.body.innerHTML = ""; const d = document.createElement("div"); d.id = "ended"; d.className = "show";
+    d.innerHTML = "<div><h2>已停止运行</h2><p>所有计算都已结束，可以直接关闭这个标签页。</p></div>"; document.body.appendChild(d); }, 120);
+});
+// 自检（?selftest=1）：three.js 已加载、场景里有角色、导出的镜头 JSON 字段齐全
+if (new URLSearchParams(location.search).has("selftest")) {
+  const errs = [];
+  addEventListener("error", e => errs.push(String(e.message || e)));
+  setTimeout(() => {
+    const st = window.__stage, shot = buildShot();
+    const need = ["shot_id", "scene", "characters", "camera", "lighting", "action", "duration", "negative_prompt",
+                  "emotion", "dialogue", "image_prompt", "video_prompt"];
+    const r = { three: !!(window.THREE && THREE.REVISION), revision: window.THREE && THREE.REVISION,
+                actors: st ? st.charObjs().length : 0, fields_ok: need.every(k => k in shot),
+                image_prompt_has_lens: /mm/.test(shot.image_prompt), errors: errs };
+    r.ok = r.three && r.actors >= 1 && r.fields_ok && !errs.length;
+    const pre = document.createElement("pre"); pre.id = "selftest"; pre.hidden = true; pre.textContent = JSON.stringify(r);
+    document.body.appendChild(pre); document.title = r.ok ? "SELFTEST PASS" : "SELFTEST FAIL";
+  }, 600);
+}
+(function () {
+  const C = window.CREDITS || {};
+  $("credits").textContent = [C.AUTHOR && "作者 " + C.AUTHOR + (C.AUTHOR_EMAIL ? "（" + C.AUTHOR_EMAIL + "）" : ""), C.UNIVERSITY_EN, C.UNIVERSITY_KO, "代码 MIT · 文档 CC BY 4.0",
+    "3D 引擎 three.js r128（MIT，见 vendor/three/LICENSE）"].filter(Boolean).join(" · ");
+})();
+</script>
+</body>
+</html>

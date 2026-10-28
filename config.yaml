@@ -1,0 +1,89 @@
+# =============================================================================
+# AIGC 漫剧多 Agent 生成平台 · 全局配置
+# -----------------------------------------------------------------------------
+# 约束（项目约束）：模型名 / 价格全部做成「可配置项」，因为生态 3~6 个月就换代。
+# 上线接真实 API 前，请到各官方文档核对当前模型 id 与定价，改这里即可，无需改代码。
+# =============================================================================
+
+runtime:
+  mode: mock              # mock = 离线零预算(默认, 无需任何 key) | ollama = 本地真实小模型(零费用, 无需 key) | real = 接云端 API
+  output_dir: output      # 所有产物输出目录
+  seed: 20260529          # 全局随机种子基准；角色/分镜图的 seed 由它确定性派生，保证可复现
+
+ollama:
+  # 本地 Ollama 后端（2026-06-12 新增）：把 runtime.mode 改成 ollama 即一键启用，
+  # 文本走本地真实模型、图像仍走 placeholder，全程零费用、无需任何 API key。
+  # 前置条件：已安装并启动 Ollama，且 `ollama pull qwen3:4b`（或改下面 model 为已有模型）。
+  provider: ollama
+  model: qwen3:4b                        # `ollama list` 里的模型名；4b 适合 CPU/小显存，可换 qwen3:8b 等
+  base_url: http://localhost:11434/v1    # Ollama 的 OpenAI 兼容接口地址
+  temperature: 0.7
+  max_retries: 2                         # 结构化输出校验失败时的重试次数（错误会回灌给模型自纠）
+  timeout_seconds: 300                   # 单次请求超时（秒）；本地小模型首次加载/长 JSON 生成较慢，宜放宽
+  # 本地推理零费用：单价全部为 0（成本报告会如实显示 $0）
+  price_input_per_mtok_usd: 0.0
+  price_input_cached_per_mtok_usd: 0.0
+  price_output_per_mtok_usd: 0.0
+
+llm:
+  # 注意：mock/ollama 模式忽略以下参数；real 模式才会真正联网调用。
+  # （real 模式下也可把 provider 改成 ollama，并把 model/base_url 改成上面 ollama 段的取值。）
+  provider: deepseek
+  # 2026-05-29 官方核对：模型别名 deepseek-chat 现已对应 DeepSeek-V4-Flash 的「非思考模式」
+  #（向后兼容，官方提示该别名未来会废弃）。旧版本已被新版本取代——典型的版本换代。
+  model: deepseek-chat
+  base_url: https://api.deepseek.com
+  api_key_env: DEEPSEEK_API_KEY     # 从环境变量 / .env 读取，切勿把密钥写进代码或提交到仓库
+  temperature: 0.7
+  max_retries: 2                    # 结构化输出校验失败时的重试次数
+  # 定价：每百万 token，单位 USD。2026-05-29 官方核对值；上线前请再核对：
+  # https://api-docs.deepseek.com/quick_start/pricing
+  price_input_per_mtok_usd: 0.14          # 输入(cache-miss)
+  price_input_cached_per_mtok_usd: 0.0028 # 输入(cache-hit)
+  price_output_per_mtok_usd: 0.28         # 输出
+
+review_llm:
+  # 审稿/合规 Agent 可换更强模型(需求文档 4.2：可换用更擅长严格 JSON 校验的模型)。
+  use_main: true          # true = 直接复用上面的主 LLM；false 时填下面独立配置
+  provider: deepseek
+  model: deepseek-reasoner  # 对应 V4-Flash 的「思考模式」，更适合逻辑/合规校验
+  base_url: https://api.deepseek.com
+  api_key_env: DEEPSEEK_API_KEY
+
+image:
+  provider: placeholder   # placeholder = 离线占位图(默认) | seedream(即梦/火山) | nano_banana(Gemini 3 Pro Image)
+  size: [768, 1024]       # 竖屏 3:4，贴合漫剧 / 9:16 短视频
+  # 以下仅 real 模式 + 非 placeholder 时生效；不同服务商字段不同，按其文档补全 cloud.py
+  model: seedream-4.0
+  base_url: ""
+  api_key_env: IMAGE_API_KEY
+  price_per_image_usd: 0.1   # 占位示意值；上线前核对所选服务商定价
+
+compose:
+  # 后期合成（需求文档 4.7）：MVP 离线产出"草样片 GIF + 占位配音 + 剪辑时间线 + FFmpeg 脚本"。
+  aspect_ratio: "9:16"     # 竖屏短视频
+  fps: 25
+  reel_max_shots: 8        # 草样片最多收录镜数（超出截断并提示）
+  reel_width: 360          # 草样片 GIF 画布宽（9:16）
+
+video:
+  # 真实成片视频默认不生成（需求文档 10.1 不强求）；合成 Agent 已产出草样片与 video_prompt。
+  enabled: false
+  # 阶段二可接入：可灵 Kling / Seedance / Vidu；本地 Wan2.2 TI2V-5B(8GB) / HunyuanVideo 1.5(14GB)
+
+cost:
+  # 成本控制（需求文档 第五/十一章「成本控制 Agent」）用的「示意单价」。
+  # 作用：离线也能估算「若改用真实云端模型生产本片，大约要花多少钱」，帮助权衡。
+  # 注意：以下均为 2026-05 示意值，务必上线前到各官方文档核对真实定价（生态 3~6 个月换代）。
+  video_per_second_usd: 0.10     # 真实视频(可灵约 0.48~0.96 元/秒，按汇率折算示意)
+  tts_per_1k_chars_usd: 0.15     # 云端 TTS 示意（本地 CosyVoice/IndexTTS 为 0）
+  # 图像单价复用 image.price_per_image_usd；LLM 单价复用 llm.price_*
+
+dispatch:
+  # 多模型调度（需求文档 4.6「视频生成多模型调度，不绑死一个模型」/ 10.3）。模型名可配置。
+  # 策略：关键镜（特写/多角色/高情绪/首尾）用强一致性图像 + 真实视频；其余用性价比图像 + 占位视频。
+  image_model_strong: nano-banana-pro   # 强一致性：特写/多角色/关键镜
+  image_model_cheap: seedream-4.0       # 性价比：远景/单角色
+  video_model_real: kling-3.0           # 关键镜真实视频
+  video_placeholder: storyboard-image   # 其余镜：分镜图 + 轻动效（草样片即此思路）
+  key_shot_max: 2                       # 最多几镜用真实视频（与成本控制联动）
